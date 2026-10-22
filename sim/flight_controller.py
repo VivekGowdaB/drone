@@ -1,6 +1,6 @@
 from sim.flight_command import FlightCommand
 from missions.waypoint import Waypoint
-from ursina import Vec3
+from sim.vec3 import Vec3
 
 class FlightController:
     """Converts high-level navigation goals (Waypoints) into a FlightCommand."""

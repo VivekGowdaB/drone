@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from ursina import Vec3
+from sim.vec3 import Vec3
 
 class Path:
     """Represents a computed route."""

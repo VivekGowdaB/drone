@@ -44,21 +44,21 @@ class Simulator:
         # Centralized Environment (Source of Truth for obstacles)
         from navigation.environment import Environment
         from navigation.obstacles import BoxObstacle
-        from ursina import Vec3
+        from sim.vec3 import Vec3
         from config import WORLD_LIMIT, MAX_HEIGHT
         
         self.environment = Environment()
         self._populate_environment()
         
-        self.swarm_model = SwarmModel()
+        self.swarm_model = SwarmModel(environment=self.environment)
         # The SwarmModel currently manages the mission manager. We'll pass the environment 
         # to the swarm_model or physics_engine during the step.
         
         self.is_paused = False
 
     def _populate_environment(self):
-        from navigation.obstacles import BoxObstacle
-        from ursina import Vec3
+        from navigation.obstacles import BoxObstacle, SphereObstacle, CylinderObstacle
+        from sim.vec3 import Vec3
         from config import WORLD_LIMIT
         
         # Walls
@@ -82,6 +82,10 @@ class Simulator:
         for pos, h in buildings:
             self.environment.add_obstacle(BoxObstacle(center=Vec3(pos.x, h/2, pos.z), size=Vec3(4, h, 4)))
             
+        # Obstacles for path planning demonstration
+        self.environment.add_obstacle(SphereObstacle(Vec3(0, 10, 0), radius=3.0))
+        self.environment.add_obstacle(BoxObstacle(Vec3(10, 10, 10), size=Vec3(4, 20, 4)))
+        self.environment.add_obstacle(CylinderObstacle(Vec3(-10, 0, -10), radius=2.5, height=20.0))
         
     def pause(self):
         self.is_paused = True

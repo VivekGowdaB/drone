@@ -1,4 +1,4 @@
-from ursina import Vec3
+from sim.vec3 import Vec3
 
 class FlightCommand:
     """The desired control inputs requested by the flight controller."""

@@ -1,5 +1,5 @@
 import math
-from ursina import Vec3
+from sim.vec3 import Vec3
 
 class Obstacle:
     """Base class for environment obstacles."""

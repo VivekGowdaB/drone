@@ -1,6 +1,6 @@
 from missions.mission import Mission, MissionStatus
 from missions.waypoint import Waypoint
-from ursina import Vec3
+from sim.vec3 import Vec3
 from navigation.planner_factory import PlannerFactory
 from navigation.environment import Environment
 from navigation.path_converter import PathConverter
@@ -60,15 +60,10 @@ class PlannedMission(Mission):
         planner = PlannerFactory.create_planner(planner_name)
         result = planner.plan(Vec3(start), Vec3(goal), env)
         
-        # Benchmark
-        result.print_benchmark()
-        
         # Convert path to waypoints
-        if result.success and result.path:
+        if result.success and result.path and result.path.waypoints:
             self.queue = PathConverter.to_queue(result.path)
+            self.status = MissionStatus.CREATED
         else:
-            from config import DEBUG_MODE
-            if DEBUG_MODE:
-                print(f"Warning: {planner_name} failed to find a path!")
             self.status = MissionStatus.FAILED
 

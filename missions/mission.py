@@ -1,3 +1,4 @@
+from missions.waypoint import Waypoint
 from enum import Enum
 from missions.waypoint_queue import WaypointQueue
 from missions.mission_events import MissionEvent, MissionEventType

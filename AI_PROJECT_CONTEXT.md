@@ -266,3 +266,33 @@ None. The simulator is stable and launches without runtime exceptions.
 - Files: `sim/collision_avoidance.py`, `missions/mission_types.py`
 - Summary: Mission Execution & Flight Behavior Stabilization. Fixed missing thrust logic in collision avoidance, fixed Patrol mission early completion, and fixed Return Home altitude bounds.
 
+=====================================================
+
+# Unified Environment & Path Planning Integration
+
+**Date:** 2026-08-27
+**Files modified:** `sim/simulator.py`, `sim/swarm_model.py`, `world.py`, `drone.py`, `swarm.py`, `ui_manager.py`, `missions/mission_types.py`
+**Changes Made:**
+1. Unified `Environment` ownership into `Simulator` (removed duplicate environment from `SwarmModel`) so physics, planning, and rendering all share the exact same bounding boxes.
+2. Migrated `SphereObstacle` and `CylinderObstacle` to the globally authoritative environment so they are actually drawn by `world.py` and calculated by physics.
+3. Updated `world.py` to dynamically draw `model='sphere'` and `model='cylinder'` when they are present in the environment.
+4. Hooked `PlannedMission` directly into the Operator Console, allowing the user to select between A*, RRT, RRT*, and Straight-Line planners via a new UI toggle button.
+5. Added Destination X and Z coordinate inputs in the UI, enabling exact path planning goals.
+6. Implemented a fully 3D path visualization in `drone.py` that draws a green line connecting all generated waypoints when a planned mission is assigned.
+7. Enhanced `PlannedMission` to fail securely and loudly (in the UI info panel) if the path validation fails or the goal is unreachable.
+**Verification performed:**
+- No syntax errors detected.
+- Simulator successfully loads Sphere and Cylinder obstacles alongside Box obstacles.
+- Planner algorithms successfully route around all obstacle types.
+- UI allows seamless switching between planners and correctly displays failure messages when destination is blocked.
+**Remaining known issues:**
+- RRT and RRT* occasionally return sub-optimal, jagged paths. A path-smoothing algorithm may be needed in the future.
+
+=====================================================
+
+# Change Log (Continued)
+
+**v0.8** - 2026-08-27
+- Files: `sim/simulator.py`, `sim/swarm_model.py`, `world.py`, `drone.py`, `swarm.py`, `ui_manager.py`, `missions/mission_types.py`
+- Summary: Unified Environment & Path Planning Integration. Synchronized the environment between physics, visuals, and the path planning API, and exposed A*/RRT to the Operator Console with 3D path rendering.
+

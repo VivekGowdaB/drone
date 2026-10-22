@@ -1,5 +1,5 @@
 import time
-from ursina import Vec3
+from sim.vec3 import Vec3
 from navigation.planner import Planner
 from navigation.environment import Environment
 from navigation.planning_result import PlanningResult

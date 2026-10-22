@@ -1,5 +1,5 @@
 from typing import List
-from ursina import Vec3
+from sim.vec3 import Vec3
 from config import WORLD_LIMIT, MIN_HEIGHT, MAX_HEIGHT
 from navigation.obstacles import Obstacle
 

@@ -1,6 +1,6 @@
 from sim.flight_command import FlightCommand
 from sim.drone_state import DroneState
-from ursina import lerp, Vec3
+from sim.vec3 import Vec3, lerp
 from config import WORLD_LIMIT, MIN_HEIGHT, MAX_HEIGHT
 
 class PhysicsEngine:

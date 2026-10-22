@@ -1,4 +1,4 @@
-from ursina import Vec3
+from sim.vec3 import Vec3
 from typing import Dict, Any
 
 class Waypoint:

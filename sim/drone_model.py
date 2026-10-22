@@ -1,6 +1,6 @@
 import uuid
 import random
-from ursina import Vec3
+from sim.vec3 import Vec3
 from config import *
 from sim.drone_state import DroneState
 from sim.flight_controller import FlightController

@@ -1,5 +1,5 @@
 from enum import Enum
-from ursina import Vec3
+from sim.vec3 import Vec3
 from config import DRONE_SPEED
 
 class DroneStateEnum(Enum):

@@ -4,6 +4,7 @@ import time
 def run_headless():
     sim = Simulator(target_hz=60)
     print("Starting headless simulation...")
+    sim.swarm_model.spawn_drones(1)
     
     # Run 120 ticks (2 seconds of sim time)
     for _ in range(120):

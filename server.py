@@ -109,6 +109,16 @@ class SimulationServer:
                     target_vec = Vec3(float(dest["x"]), float(dest["y"]), float(dest["z"]))
                     self.simulator.swarm_model.assign_planned_mission(drone_id, planner, target_vec)
 
+            # Zone sector controls
+            elif cmd == "sector_hold":
+                sector_id = int(payload.get("sector_id", -1))
+                affected = self.simulator.swarm_model.zone_manager.set_hold(sector_id, True)
+                print(f"Sector {sector_id} on HOLD ({affected} UAVs hovering)")
+            elif cmd == "sector_release":
+                sector_id = int(payload.get("sector_id", -1))
+                self.simulator.swarm_model.zone_manager.set_hold(sector_id, False)
+                print(f"Sector {sector_id} RELEASED")
+
         except Exception as e:
             print(f"Command error: {e}")
 

@@ -18,6 +18,7 @@ from missions.mission_manager import MissionManager
 from missions.mission import MissionStatus
 from missions.waypoint import Waypoint
 from navigation.environment import Environment
+from sim.zone_manager import ZoneManager
 class SwarmModel:
     """Pure simulation model for the entire swarm.
     Holds the DroneModels and SpatialHashGrid,
@@ -32,6 +33,9 @@ class SwarmModel:
             environment if environment is not None else Environment()
         )
         self._next_drone_id = 1
+        # Four-sector zone tracking (enter/leave handover events).
+        self.zone_manager = ZoneManager(self)
+        self.sim_time = 0.0
         # Performance profiling
         self._frame = 0
         self._sample_interval = 60
@@ -68,9 +72,19 @@ class SwarmModel:
                 self.mission_manager.cancel_mission(drone.id)
                 return True
         return False
+    def remove_all_drones(self):
+        """Remove every drone from the swarm and cancel all missions.
+        Returns the number of UAVs removed."""
+        removed = len(self.drones)
+        for drone in list(self.drones):
+            self.grid.remove(drone)
+            self.mission_manager.cancel_mission(drone.id)
+        self.drones.clear()
+        return removed
     def update(self, dt: float, physics_engine, environment=None):
         """Advance the swarm simulation by one tick."""
         self._frame += 1
+        self.sim_time += dt
         # Periodically compare naive neighbor searching with the spatial grid.
         if self._frame % self._sample_interval == 0:
             n = len(self.drones)
@@ -144,6 +158,9 @@ class SwarmModel:
             )
             # 6. Update spatial-grid membership.
             self.grid.update(drone)
+        # 7. Track which square sector each UAV belongs to and emit
+        # enter/leave handover events when they cross sector lines.
+        self.zone_manager.update()
     def get_drone(self, drone_id):
         """Return a drone by its ID, or None if it does not exist."""
         for drone in self.drones:

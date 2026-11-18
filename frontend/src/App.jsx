@@ -6,8 +6,9 @@ import './App.css';
 // --- WebSocket Connection Hook ---
 function useSimulationSocket(url) {
   const [environment, setEnvironment] = useState({ obstacles: [] });
-  const [simState, setSimState] = useState({ uavs: [], time: 0, paused: false });
+  const [simState, setSimState] = useState({ uavs: [], time: 0, paused: false, zones: { sectors: [], events: [] } });
   const [status, setStatus] = useState("Disconnected");
+  const [zoneEvents, setZoneEvents] = useState([]);
   const wsRef = useRef(null);
   const reconnectRef = useRef(null);
   const mountedRef = useRef(true);
@@ -43,6 +44,23 @@ function useSimulationSocket(url) {
             setEnvironment(msg.data);
           } else if (msg.type === 'state') {
             setSimState(msg.data);
+            // Accumulate sector enter/leave events locally so the log
+            // survives reconnects and backend buffer trimming.
+            const evts = msg.data.zones && msg.data.zones.events;
+            if (evts && evts.length) {
+              setZoneEvents(prev => {
+                const merged = [...prev, ...evts];
+                const seen = new Set();
+                const deduped = [];
+                for (let i = merged.length - 1; i >= 0; i--) {
+                  if (!seen.has(merged[i].seq)) {
+                    seen.add(merged[i].seq);
+                    deduped.push(merged[i]);
+                  }
+                }
+                return deduped.reverse().slice(-100);
+              });
+            }
           }
         } catch (e) {
           console.error("Failed to parse message:", e);
@@ -87,7 +105,7 @@ function useSimulationSocket(url) {
     }
   }, []);
 
-  return { environment, simState, status, sendCommand };
+  return { environment, simState, status, sendCommand, zoneEvents };
 }
 
 
@@ -129,10 +147,12 @@ function EnvironmentRenderer({ obstacles }) {
   );
 }
 
-function UAVMesh({ uav, isSelected, onSelect }) {
+function UAVMesh({ uav, isSelected, onSelect, held }) {
   const pathPoints = uav.planned_path && uav.planned_path.length > 1
     ? uav.planned_path.map(p => [p.x, p.y, p.z])
     : null;
+
+  const bodyColor = held ? "#ffaa00" : (isSelected ? "#00ff88" : "#ff4444");
 
   return (
     <group>
@@ -144,8 +164,8 @@ function UAVMesh({ uav, isSelected, onSelect }) {
       >
         <sphereGeometry args={[0.5, 16, 16]} />
         <meshStandardMaterial
-          color={isSelected ? "#00ff88" : "#ff4444"}
-          emissive={isSelected ? "#00ff88" : "#ff4444"}
+          color={bodyColor}
+          emissive={bodyColor}
           emissiveIntensity={isSelected ? 0.4 : 0.15}
         />
 
@@ -187,8 +207,10 @@ function UAVMesh({ uav, isSelected, onSelect }) {
   );
 }
 
-function SwarmRenderer({ uavs, selectedUAV, onSelectUAV }) {
+function SwarmRenderer({ uavs, selectedUAV, onSelectUAV, sectors }) {
   if (!uavs || uavs.length === 0) return null;
+
+  const heldSet = new Set((sectors || []).filter(s => s.on_hold).map(s => s.id));
 
   return (
     <group>
@@ -198,8 +220,60 @@ function SwarmRenderer({ uavs, selectedUAV, onSelectUAV }) {
           uav={uav}
           isSelected={selectedUAV === uav.id}
           onSelect={onSelectUAV}
+          held={uav.sector != null && heldSet.has(uav.sector)}
         />
       ))}
+    </group>
+  );
+}
+
+const SECTOR_TINTS = ["#3d7bd9", "#4caf7d", "#d98a3d", "#b3599f"];
+
+function SectorOverlays({ sectors, selectedSector, onSelectSector }) {
+  if (!sectors || sectors.length === 0) return null;
+
+  return (
+    <group>
+      {sectors.map((s, i) => {
+        const w = s.bounds.max_x - s.bounds.min_x;
+        const h = s.bounds.max_z - s.bounds.min_z;
+        const cx = (s.bounds.min_x + s.bounds.max_x) / 2;
+        const cz = (s.bounds.min_z + s.bounds.max_z) / 2;
+        const isSelected = selectedSector === s.id;
+        return (
+          <group key={s.id}>
+            <mesh
+              rotation={[-Math.PI / 2, 0, 0]}
+              position={[cx, 0.02, cz]}
+              onClick={(e) => { e.stopPropagation(); onSelectSector(s.id); }}
+              onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
+              onPointerOut={() => { document.body.style.cursor = 'default'; }}
+            >
+              <planeGeometry args={[w, h]} />
+              <meshBasicMaterial
+                color={isSelected ? "#00d4aa" : SECTOR_TINTS[i % SECTOR_TINTS.length]}
+                transparent
+                opacity={isSelected ? 0.22 : 0.07}
+                depthWrite={false}
+              />
+            </mesh>
+            <Html position={[cx, 1.5, cz]} center style={{ pointerEvents: 'none' }}>
+              <div style={{
+                background: s.on_hold ? 'rgba(255,170,0,0.85)' : 'rgba(0,0,0,0.6)',
+                color: s.on_hold ? '#000' : '#fff',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                whiteSpace: 'nowrap',
+                fontWeight: isSelected ? 'bold' : 'normal',
+                border: isSelected ? '1px solid #00d4aa' : 'none'
+              }}>
+                {s.name} · {s.drone_count} UAV{s.on_hold ? ' · HOLD' : ''}
+              </div>
+            </Html>
+          </group>
+        );
+      })}
     </group>
   );
 }
@@ -220,7 +294,8 @@ function CADTarget({ position, color, isGhost }) {
   );
 }
 
-function SimulationScene({ environment, simState, selectedUAV, selectedUAVData, onSelectUAV, isSelectingDestination, setSelectedDestination, selectedDestination, hoveredDestination, setHoveredDestination, currentAltitude, setCurrentAltitude }) {
+function SimulationScene({ environment, simState, selectedUAV, selectedUAVData, onSelectUAV, isSelectingDestination, setSelectedDestination, selectedDestination, hoveredDestination, setHoveredDestination, currentAltitude, setCurrentAltitude, sectors, selectedSector, onSelectSector }) {
+  const zoneData = simState.zones || { sectors: [], events: [] };
   return (
     <Canvas camera={{ position: [0, 25, 40], fov: 55 }}>
       <Sky distance={450000} sunPosition={[5, 1, 3]} inclination={0} azimuth={0.25} />
@@ -277,11 +352,18 @@ function SimulationScene({ environment, simState, selectedUAV, selectedUAVData, 
       <CADTarget position={hoveredDestination} color="#00ffff" isGhost={true} />
       <CADTarget position={selectedDestination} color="#ff00ff" isGhost={false} />
 
+      <SectorOverlays
+        sectors={zoneData.sectors}
+        selectedSector={selectedSector}
+        onSelectSector={onSelectSector}
+      />
+
       <EnvironmentRenderer obstacles={environment.obstacles} />
       <SwarmRenderer
         uavs={simState.uavs}
         selectedUAV={selectedUAV}
         onSelectUAV={onSelectUAV}
+        sectors={zoneData.sectors}
       />
 
       <OrbitControls makeDefault enabled={!isSelectingDestination} />
@@ -337,8 +419,17 @@ function TopBar({ paused, sendCommand, connected }) {
   );
 }
 
-function LeftPanel({ environment, connected, uavs, selectedUAV, onSelectUAV, sendCommand }) {
+function LeftPanel({ environment, connected, uavs, selectedUAV, onSelectUAV, sendCommand, sectors, selectedSector, onSelectSector, zoneEvents }) {
   const [spawnCount, setSpawnCount] = useState(3);
+
+  const activeSector = sectors ? sectors.find(s => s.id === selectedSector) : null;
+  const visibleUavs = selectedSector == null
+    ? uavs
+    : (uavs || []).filter(u => u.sector === selectedSector);
+
+  const sectorEvents = selectedSector == null
+    ? zoneEvents
+    : (zoneEvents || []).filter(e => e.sector_id === selectedSector);
 
   return (
     <div className="panel left-panel">
@@ -347,7 +438,48 @@ function LeftPanel({ environment, connected, uavs, selectedUAV, onSelectUAV, sen
         <p>Obstacles: {environment.obstacles ? environment.obstacles.length : 0}</p>
       </div>
 
-      <h3>Spawn Drones</h3>
+      <h3>Map Sectors {selectedSector != null ? `(${activeSector ? activeSector.name : ''})` : ''}</h3>
+      <div className="panel-section sector-grid">
+        {sectors && sectors.map(s => (
+          <div
+            key={s.id}
+            className={`sector-card ${selectedSector === s.id ? 'selected' : ''} ${s.on_hold ? 'on-hold' : ''}`}
+            onClick={() => onSelectSector(selectedSector === s.id ? null : s.id)}
+          >
+            <div className="sector-card-top">
+              <span className="sector-name">{s.name}</span>
+              <span className="sector-count">{s.drone_count}</span>
+            </div>
+            <div className="sector-card-bottom">
+              <span className={`sector-state ${s.on_hold ? 'hold' : ''}`}>
+                {s.on_hold ? 'ON HOLD' : 'ACTIVE'}
+              </span>
+              <button
+                className="sector-hold-btn"
+                disabled={!connected}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  sendCommand(s.on_hold
+                    ? { command: 'sector_release', sector_id: s.id }
+                    : { command: 'sector_hold', sector_id: s.id });
+                }}
+              >
+                {s.on_hold ? 'Release' : 'Hold'}
+              </button>
+            </div>
+          </div>
+        ))}
+        {selectedSector != null && (
+          <button
+            className="full-btn clear-sector-btn"
+            onClick={() => onSelectSector(null)}
+          >
+            Show All Sectors
+          </button>
+        )}
+      </div>
+
+      <h3>Manage UAVs</h3>
       <div className="panel-section">
         <div className="spawn-row">
           <input
@@ -364,45 +496,109 @@ function LeftPanel({ environment, connected, uavs, selectedUAV, onSelectUAV, sen
             disabled={!connected}
             onClick={() => sendCommand({command: 'spawn', count: spawnCount})}
           >
-            Spawn
+            Add
+          </button>
+          <button
+            className="full-btn clear-all-btn"
+            disabled={!connected || !uavs || uavs.length === 0}
+            onClick={() => sendCommand({command: 'remove_all'})}
+            title="Remove all UAVs"
+          >
+            Remove All
           </button>
         </div>
       </div>
 
-      <h3>Drone List ({uavs ? uavs.length : 0})</h3>
+      <h3>
+        Drone List ({visibleUavs ? visibleUavs.length : 0})
+        {selectedSector != null && activeSector ? ` — ${activeSector.name}` : ''}
+      </h3>
       <div className="panel-section drone-list-scroll">
-        {uavs && uavs.map(uav => (
+        {visibleUavs && visibleUavs.map(uav => (
           <div
             key={uav.id}
             className={`uav-item ${selectedUAV === uav.id ? 'selected' : ''}`}
             onClick={() => onSelectUAV(uav.id)}
           >
             <span className="uav-name">{uav.readable_id || uav.id.substring(0, 8)}</span>
-            <span className="uav-mission">{uav.mission}</span>
+            <span className="uav-item-right">
+              <span className="uav-mission">{uav.mission}</span>
+              <button
+                className="uav-remove-btn"
+                title="Remove this UAV"
+                disabled={!connected}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  sendCommand({ command: 'remove', drone_id: uav.id });
+                }}
+              >
+                ✕
+              </button>
+            </span>
           </div>
         ))}
-        {(!uavs || uavs.length === 0) && (
-          <p className="empty-msg">No UAVs. Click Spawn to add.</p>
+        {(!visibleUavs || visibleUavs.length === 0) && (
+          <p className="empty-msg">
+            {selectedSector != null ? 'No UAVs in this sector.' : 'No UAVs. Click Spawn to add.'}
+          </p>
+        )}
+      </div>
+
+      <h3>Sector Events {selectedSector != null && activeSector ? `— ${activeSector.name}` : '(All)'}</h3>
+      <div className="panel-section event-log-scroll">
+        {sectorEvents && sectorEvents.map(e => (
+          <div key={e.seq} className={`event-row event-${e.type.toLowerCase()}`}>
+            <span className="event-time">{e.time.toFixed(0)}s</span>
+            <span className="event-msg">{e.message}</span>
+          </div>
+        ))}
+        {(!sectorEvents || sectorEvents.length === 0) && (
+          <p className="empty-msg">No sector transitions yet.</p>
         )}
       </div>
     </div>
   );
 }
 
-function RightPanel({ selectedUAVData, selectedUAV, connected, sendCommand, isSelectingDestination, setIsSelectingDestination, selectedDestination, setSelectedDestination, hoveredDestination }) {
+function RightPanel({ selectedUAVData, selectedUAV, connected, sendCommand, isSelectingDestination, setIsSelectingDestination, selectedDestination, setSelectedDestination, hoveredDestination, sectors, selectedSector }) {
   const [planner, setPlanner] = useState("A*");
 
-  const noSelection = !selectedUAV;
+  const activeSector = sectors ? sectors.find(s => s.id === selectedSector) : null;
+  const droneSector = sectors && selectedUAVData && selectedUAVData.sector != null
+    ? sectors.find(s => s.id === selectedUAVData.sector)
+    : null;
+
+  // Actions only apply to a drone that belongs to the focused sector.
+  const noSelection = !selectedUAV ||
+    (selectedSector != null && selectedUAVData && selectedUAVData.sector !== selectedSector);
+  // A sector on HOLD refuses new task assignments.
+  const sectorHeld = activeSector ? activeSector.on_hold : false;
+  const actionsDisabled = !connected || noSelection || sectorHeld;
   const displayDest = selectedDestination || hoveredDestination;
 
   return (
     <div className="panel right-panel">
+      {/* Active sector context */}
+      {selectedSector != null && (
+        <div className={`sector-banner ${sectorHeld ? 'held' : ''}`}>
+          <div className="sector-banner-title">
+            Control Focus: {activeSector ? activeSector.name : `Sector ${selectedSector}`}
+          </div>
+          {sectorHeld && (
+            <div className="sector-banner-sub">
+              Sector is ON HOLD — UAVs hover, new tasks blocked
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Telemetry */}
       <h3>Drone Information</h3>
       <div className="panel-section telemetry">
         {selectedUAVData ? (
           <>
             <div className="telem-row"><span>ID:</span><span>{selectedUAVData.readable_id}</span></div>
+            <div className="telem-row"><span>In Sector:</span><span>{droneSector ? droneSector.name : 'Outside'}</span></div>
             <div className="telem-row"><span>State:</span><span>{selectedUAVData.state}</span></div>
             <div className="telem-row"><span>Mission:</span><span>{selectedUAVData.mission}</span></div>
             <div className="telem-row"><span>Status:</span><span>{selectedUAVData.mission_status}</span></div>
@@ -447,37 +643,47 @@ function RightPanel({ selectedUAVData, selectedUAV, connected, sendCommand, isSe
         ) : (
           <p className="empty-msg">No drone selected.</p>
         )}
+        {noSelection && selectedUAV && selectedUAVData && selectedSector != null && (
+          <p className="empty-msg">Selected drone is not in the focused sector.</p>
+        )}
       </div>
 
       {/* Mission Actions */}
-      <h3>Actions</h3>
+      <h3>Actions{selectedSector != null ? ` (${activeSector ? activeSector.name : ''})` : ''}</h3>
       <div className="panel-section">
         <div className="action-grid">
           <button
-            disabled={!connected || noSelection}
-            onClick={() => sendCommand({command: 'hover', drone_id: selectedUAV})}
+            disabled={actionsDisabled}
+            onClick={() => sendCommand({command: 'hover', drone_id: selectedUAV, sector_id: selectedSector})}
           >
             Hover
           </button>
           <button
-            disabled={!connected || noSelection}
-            onClick={() => sendCommand({command: 'waypoint', drone_id: selectedUAV})}
+            disabled={actionsDisabled}
+            onClick={() => sendCommand({command: 'waypoint', drone_id: selectedUAV, sector_id: selectedSector})}
           >
             Waypoint
           </button>
           <button
-            disabled={!connected || noSelection}
-            onClick={() => sendCommand({command: 'patrol', drone_id: selectedUAV})}
+            disabled={actionsDisabled}
+            onClick={() => sendCommand({command: 'patrol', drone_id: selectedUAV, sector_id: selectedSector})}
           >
             Patrol
           </button>
           <button
-            disabled={!connected || noSelection}
-            onClick={() => sendCommand({command: 'return_home', drone_id: selectedUAV})}
+            disabled={actionsDisabled}
+            onClick={() => sendCommand({command: 'return_home', drone_id: selectedUAV, sector_id: selectedSector})}
           >
             Return Home
           </button>
         </div>
+        <button
+          className="full-btn remove-uav-btn"
+          disabled={!connected || !selectedUAV || !selectedUAVData}
+          onClick={() => sendCommand({command: 'remove', drone_id: selectedUAV})}
+        >
+          🗑 Remove Selected UAV
+        </button>
       </div>
 
       {/* Path Planning */}
@@ -487,7 +693,7 @@ function RightPanel({ selectedUAVData, selectedUAV, connected, sendCommand, isSe
           <button
             className={`full-btn ${isSelectingDestination ? 'btn-active' : ''}`}
             onClick={() => setIsSelectingDestination(!isSelectingDestination)}
-            disabled={!connected || noSelection}
+            disabled={actionsDisabled}
           >
             {isSelectingDestination ? 'Cancel Selection' : 'Select Destination'}
           </button>
@@ -512,7 +718,7 @@ function RightPanel({ selectedUAVData, selectedUAV, connected, sendCommand, isSe
             <select
               value={planner}
               onChange={(e) => setPlanner(e.target.value)}
-              disabled={!connected || noSelection}
+              disabled={actionsDisabled}
             >
               <option value="A*">A*</option>
               <option value="RRT">RRT</option>
@@ -528,12 +734,13 @@ function RightPanel({ selectedUAVData, selectedUAV, connected, sendCommand, isSe
                   command: 'plan_path',
                   drone_id: selectedUAV,
                   planner: planner,
-                  dest: selectedDestination
+                  dest: selectedDestination,
+                  sector_id: selectedSector
                 });
                 setIsSelectingDestination(false);
               }
             }}
-            disabled={!connected || noSelection || !selectedDestination}
+            disabled={actionsDisabled || !selectedDestination}
           >
             Plan Path
           </button>
@@ -568,31 +775,39 @@ function StatusArea({ status, simTime, uavCount, paused }) {
 }
 
 function App() {
-  const { environment, simState, status, sendCommand } = useSimulationSocket("ws://localhost:8765");
+  const { environment, simState, status, sendCommand, zoneEvents } = useSimulationSocket("ws://localhost:8765");
   const connected = status === 'Connected';
   const [selectedUAV, setSelectedUAV] = useState(null);
+  const [selectedSector, setSelectedSector] = useState(null);
   const [isSelectingDestination, setIsSelectingDestination] = useState(false);
   const [selectedDestination, setSelectedDestination] = useState(null);
   const [hoveredDestination, setHoveredDestination] = useState(null);
   const [currentAltitude, setCurrentAltitude] = useState(8);
+
+  const sectors = simState.zones ? simState.zones.sectors : [];
 
   // Find the selected UAV data from the current state
   const selectedUAVData = simState.uavs
     ? simState.uavs.find(u => u.id === selectedUAV)
     : null;
 
-  // Auto-select first UAV if none selected and UAVs exist
+  // Auto-select first UAV (within the focused sector if one is active)
   useEffect(() => {
-    if (!selectedUAV && simState.uavs && simState.uavs.length > 0) {
-      setSelectedUAV(simState.uavs[0].id);
+    if (!simState.uavs || simState.uavs.length === 0) return;
+    const candidates = selectedSector == null
+      ? simState.uavs
+      : simState.uavs.filter(u => u.sector === selectedSector);
+    const stillValid = candidates.some(u => u.id === selectedUAV);
+    if (!stillValid && candidates.length > 0) {
+      setSelectedUAV(candidates[0].id);
     }
-  }, [simState.uavs, selectedUAV]);
+  }, [simState.uavs, selectedUAV, selectedSector]);
 
-  // Clear destination when switching UAVs
+  // Clear destination when switching UAVs or sectors
   useEffect(() => {
     setSelectedDestination(null);
     setIsSelectingDestination(false);
-  }, [selectedUAV]);
+  }, [selectedUAV, selectedSector]);
 
   // Handle altitude initialization
   useEffect(() => {
@@ -614,6 +829,10 @@ function App() {
           selectedUAV={selectedUAV}
           onSelectUAV={setSelectedUAV}
           sendCommand={sendCommand}
+          sectors={sectors}
+          selectedSector={selectedSector}
+          onSelectSector={setSelectedSector}
+          zoneEvents={zoneEvents}
         />
         <div className="viewport">
           <SimulationScene
@@ -629,6 +848,9 @@ function App() {
             setHoveredDestination={setHoveredDestination}
             currentAltitude={currentAltitude}
             setCurrentAltitude={setCurrentAltitude}
+            sectors={sectors}
+            selectedSector={selectedSector}
+            onSelectSector={setSelectedSector}
           />
         </div>
         <RightPanel
@@ -641,6 +863,8 @@ function App() {
           selectedDestination={selectedDestination}
           setSelectedDestination={setSelectedDestination}
           hoveredDestination={hoveredDestination}
+          sectors={sectors}
+          selectedSector={selectedSector}
         />
       </div>
       <StatusArea

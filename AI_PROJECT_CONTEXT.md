@@ -38,6 +38,9 @@ Creates path planners (A*, RRT, RRT*, StraightLine) dynamically by name.
 **CollisionAvoidance**
 Intercepts low-level `FlightCommand`s from the FlightController and modifies them to prevent crashes based on neighbor proximity.
 
+**ZoneManager**
+Divides the operational map into four equal square sectors (Alpha, Bravo, Charlie, Delta). Tracks which sector owns each UAV, emits ENTER/LEAVE handover events when drones cross sector boundaries, and supports per-sector HOLD control (incoming UAVs are forced to hover). Reads live positions from the SwarmModel; owns no drone state itself.
+
 **FlightController**
 Takes high-level waypoints and current drone state, and generates a desired velocity/acceleration vector (FlightCommand) towards the target. Does not perform collision avoidance itself.
 
@@ -62,6 +65,7 @@ The Ursina visual entity representing the drone. It strictly syncs its position 
 - `sim/`: The backend simulation engine. Contains physics, swarm model, drone models, and collision avoidance.
 - `missions/`: Mission definitions, mission assignment, and the `MissionManager`.
 - `navigation/`: Path planners, obstacles, and environment models.
+- `sim/zone_manager.py`: Four-sector map division and UAV handover tracking.
 
 =====================================================
 
@@ -73,6 +77,7 @@ The Ursina visual entity representing the drone. It strictly syncs its position 
 - [x] Path Planners (A*, RRT, RRT*, StraightLine)
 - [x] Mission Manager (Waypoint, Hover, Patrol)
 - [x] Ursina 3D Visualization decouple from backend logic
+- [x] Four-Square Map Sectors with UAV handover (enter/leave events, sector focus, sector hold control) - *v0.9*
 - [ ] Operator Console (Selection, UI Panels, Spawn/Remove) - *In Progress*
 
 =====================================================
@@ -295,4 +300,8 @@ None. The simulator is stable and launches without runtime exceptions.
 **v0.8** - 2026-08-27
 - Files: `sim/simulator.py`, `sim/swarm_model.py`, `world.py`, `drone.py`, `swarm.py`, `ui_manager.py`, `missions/mission_types.py`
 - Summary: Unified Environment & Path Planning Integration. Synchronized the environment between physics, visuals, and the path planning API, and exposed A*/RRT to the Operator Console with 3D path rendering.
+
+**v0.9** - 2026-10-28
+- Files: `sim/zone_manager.py` (new), `sim/swarm_model.py`, `sim/serializer.py`, `server.py`, `frontend/src/App.jsx`, `frontend/src/App.css`
+- Summary: Four-Square Map Sectors & Sector Control. The map (WORLD_LIMIT box) is split into four named square sectors. The backend `ZoneManager` tracks UAV ownership per tick and emits LEAVE/ENTER handover events on boundary crossings; sectors can be placed on HOLD so any UAV entering is forced to hover ("that sector controls the drone"). The React dashboard gained Map Sector cards (click to focus — Drone List, Actions, and Path Planning then apply only to UAVs inside that sector), a color-coded Sector Event log showing "left"/"entered" messages per sector, ground overlays of the four squares in the 3D view (also clickable), per-drone sector display in telemetry, and HOLD/RELEASE buttons per sector with task blocking while held.
 

@@ -65,6 +65,7 @@ class SimulationSerializer:
             uavs_data.append({
                 "id": drone.id,
                 "readable_id": drone.readable_id,
+                "sector": swarm_model.zone_manager.membership.get(drone.id),
                 "position": vec3_to_dict(drone.state.position),
                 "velocity": vec3_to_dict(drone.state.velocity),
                 "heading": vec3_to_dict(drone.state.heading),
@@ -81,5 +82,6 @@ class SimulationSerializer:
         return {
             "time": simulator.clock.sim_time,
             "paused": simulator.is_paused,
-            "uavs": SimulationSerializer.serialize_uavs(swarm_model, swarm_model.mission_manager.active_assignments)
+            "uavs": SimulationSerializer.serialize_uavs(swarm_model, swarm_model.mission_manager.active_assignments),
+            "zones": swarm_model.zone_manager.to_dict()
         }
